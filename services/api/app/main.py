@@ -17,7 +17,6 @@ if str(_SERVICE_ROOT) not in sys.path:
 from fastapi import FastAPI, HTTPException, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse, HTMLResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from app.api.routes import (  # noqa: E402
     auth,
@@ -112,13 +111,6 @@ app.include_router(recording.router)
 app.include_router(highlights.router)
 app.include_router(milestones.router)
 app.include_router(archive.router)
-
-if (_WEB_DIST_DIR / "assets").is_dir():
-    app.mount(
-        "/assets",
-        StaticFiles(directory=str(_WEB_DIST_DIR / "assets")),
-        name="web-assets",
-    )
 
 
 @app.get("/", include_in_schema=False)
