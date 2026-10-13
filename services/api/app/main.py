@@ -42,12 +42,14 @@ _WEB_DIST_DIR = _SERVICE_ROOT.parent.parent / "apps" / "web" / "dist"
 
 def _render_spa_index() -> HTMLResponse:
     """Render apps/web/dist/index.html with runtime InsForge public config injected."""
+    import os
     index_file = _WEB_DIST_DIR / "index.html"
     html = index_file.read_text(encoding="utf-8")
     cfg = get_settings()
     runtime_payload = json.dumps({
         "insforgeUrl": cfg.insforge_url,
         "insforgeAnonKey": cfg.insforge_anon_key,
+        "apiBaseUrl": os.getenv("VITE_API_BASE_URL", ""),
     })
     script_tag = f"<script>window.__CRICKET_CONFIG__ = {runtime_payload};</script>"
     if "</head>" in html:

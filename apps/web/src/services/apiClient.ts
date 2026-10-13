@@ -3,7 +3,11 @@
  * Base URL is read from VITE_API_BASE_URL (or falls back to Vite proxy).
  */
 
-const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? ''
+const runtimeApiBase =
+  typeof window !== 'undefined'
+    ? (window as unknown as { __CRICKET_CONFIG__?: { apiBaseUrl?: string } }).__CRICKET_CONFIG__?.apiBaseUrl
+    : undefined
+const rawApiBase = (runtimeApiBase || import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 const isLocalhostTarget = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(rawApiBase)
 const isBrowserLocalhost =
   typeof window !== 'undefined' &&
