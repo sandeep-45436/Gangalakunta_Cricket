@@ -3,7 +3,13 @@
  * Base URL is read from VITE_API_BASE_URL (or falls back to Vite proxy).
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? ''
+const isLocalhostTarget = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(rawApiBase)
+const isBrowserLocalhost =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+
+const API_BASE = isLocalhostTarget && !isBrowserLocalhost ? '' : rawApiBase
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 

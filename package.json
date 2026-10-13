@@ -1,0 +1,10 @@
+{
+  "name": "gangalakunta-cricket-platform",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "npm --prefix apps/web run dev",
+    "build": "npm --prefix apps/web install && npm --prefix apps/web run build",
+    "preview": "npm --prefix apps/web run preview"
+  }
+}
