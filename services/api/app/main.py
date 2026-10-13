@@ -1,14 +1,25 @@
 """
 Cricket Highlights API — main application entrypoint.
+Supports both standalone API mode and full-stack SPA hosting on Vercel (`services.api.app.main:app`).
 """
 from contextlib import asynccontextmanager
+import json
+from pathlib import Path
+import sys
 import time
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+# Ensure `services/api` is on sys.path when imported from repo root (e.g. Vercel `services.api.app.main:app`)
+_SERVICE_ROOT = Path(__file__).resolve().parent.parent
+if str(_SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICE_ROOT))
 
-from app.api.routes import (
+from fastapi import FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+from app.api.routes import (  # noqa: E402
     auth,
     health,
     teams,
@@ -20,12 +31,31 @@ from app.api.routes import (
     milestones,
     archive,
 )
-from app.core.config import get_settings
-from app.core.logging import configure_logging, get_logger
+from app.core.config import get_settings  # noqa: E402
+from app.core.logging import configure_logging, get_logger  # noqa: E402
 
 settings = get_settings()
 configure_logging(debug=settings.api_debug)
 logger = get_logger(__name__)
+
+_WEB_DIST_DIR = _SERVICE_ROOT.parent.parent / "apps" / "web" / "dist"
+
+
+def _render_spa_index() -> HTMLResponse:
+    """Render apps/web/dist/index.html with runtime InsForge public config injected."""
+    index_file = _WEB_DIST_DIR / "index.html"
+    html = index_file.read_text(encoding="utf-8")
+    cfg = get_settings()
+    runtime_payload = json.dumps({
+        "insforgeUrl": cfg.insforge_url,
+        "insforgeAnonKey": cfg.insforge_anon_key,
+    })
+    script_tag = f"<script>window.__CRICKET_CONFIG__ = {runtime_payload};</script>"
+    if "</head>" in html:
+        html = html.replace("</head>", f"{script_tag}</head>", 1)
+    else:
+        html = script_tag + html
+    return HTMLResponse(content=html)
 
 
 @asynccontextmanager
@@ -83,12 +113,38 @@ app.include_router(highlights.router)
 app.include_router(milestones.router)
 app.include_router(archive.router)
 
+if (_WEB_DIST_DIR / "assets").is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_WEB_DIST_DIR / "assets")),
+        name="web-assets",
+    )
+
 
 @app.get("/", include_in_schema=False)
-async def root() -> dict:
+async def root(request: Request):
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and (_WEB_DIST_DIR / "index.html").is_file():
+        return _render_spa_index()
     return {
         "service": "cricket-api",
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
     }
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    """Serve static files or React SPA index.html for client-side routes on Vercel."""
+    if full_path.startswith(("api/", "health", "docs", "redoc", "openapi.json")):
+        raise HTTPException(status_code=404, detail="Not Found")
+    candidate = (_WEB_DIST_DIR / full_path).resolve()
+    if (
+        str(candidate).startswith(str(_WEB_DIST_DIR.resolve()))
+        and candidate.is_file()
+    ):
+        return FileResponse(str(candidate))
+    if (_WEB_DIST_DIR / "index.html").is_file():
+        return _render_spa_index()
+    raise HTTPException(status_code=404, detail="Not Found")

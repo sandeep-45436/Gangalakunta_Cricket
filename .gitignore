@@ -24,14 +24,12 @@ venv/
 **/venv/
 env/
 *.egg-info/
-dist/
 build/
 .pytest_cache/
 **/.pytest_cache/
 *.pyc
 
-# Frontend build output
-apps/web/dist/
+# Frontend cache (apps/web/dist is tracked for Vercel full-stack hosting)
 apps/web/.vite/
 apps/mobile/.expo/
 
