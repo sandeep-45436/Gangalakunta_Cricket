@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# Environment variables — NEVER commit these (allow .env.example)
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+**/.pytest_cache/
+*.pyc
+
+# Frontend build output
+apps/web/dist/
+apps/web/.vite/
+apps/mobile/.expo/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & temporary files
+*.log
+logs/
+
+# InsForge — project.json contains credentials, never commit
+.insforge/
+**/.insforge/
+
+# Coverage
+htmlcov/
+.coverage
+coverage/
