@@ -38,8 +38,13 @@ class Settings(BaseSettings):
     insforge_anon_key: str = ""
     insforge_api_key: str = ""
 
+    # ── Gemini / LangGraph AI ─────────────────────────────────────────────────
+    gemini_api_key: str = ""
+
     @model_validator(mode="after")
     def _fallback_vite_env_vars(self) -> "Settings":
+        if not self.gemini_api_key:
+            self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
         if not self.insforge_url:
             self.insforge_url = (
                 os.getenv("VITE_INSFORGE_URL")

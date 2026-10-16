@@ -518,9 +518,11 @@ export function PlayerHighlightsPage() {
                   onChange={(e) => setFilterEventType(e.target.value)}
                   style={{ padding: '7px 10px', borderRadius: 6, border: `1px solid ${colors.border}`, fontSize: 13 }}
                 >
-                  <option value="">All Boundaries (4s & 6s)</option>
+                  <option value="">All Highlights (4s, 6s & Wickets)</option>
                   <option value="four">4️⃣ Fours Only</option>
                   <option value="six">6️⃣ Sixes Only</option>
+                  <option value="wicket">🎯 Wickets & Bowling Highlights</option>
+                  <option value="dot">🛡️ Dot Balls & Deliveries</option>
                 </select>
 
                 {(filterMatchId || filterTournament || filterEventType) && (
@@ -547,7 +549,14 @@ export function PlayerHighlightsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span
                     style={{
-                      background: selectedHighlight.event_type === 'four' ? '#0284c7' : '#d97706',
+                      background:
+                        selectedHighlight.event_type === 'wicket'
+                          ? '#dc2626'
+                          : selectedHighlight.event_type === 'four'
+                          ? '#0284c7'
+                          : selectedHighlight.event_type === 'six'
+                          ? '#d97706'
+                          : '#475569',
                       color: '#fff',
                       padding: '3px 10px',
                       borderRadius: 6,
@@ -556,7 +565,7 @@ export function PlayerHighlightsPage() {
                       textTransform: 'uppercase',
                     }}
                   >
-                    {selectedHighlight.event_type}
+                    {selectedHighlight.event_type === 'wicket' ? 'WICKET 🎯' : selectedHighlight.event_type}
                   </span>
                   <span style={{ fontWeight: 700, fontSize: 16 }}>
                     Over {selectedHighlight.delivery_metadata?.over_display ?? '—'} vs {selectedHighlight.delivery_metadata?.bowler_name ?? 'Bowler'}
@@ -738,7 +747,14 @@ export function PlayerHighlightsPage() {
                             position: 'absolute',
                             top: 8,
                             left: 8,
-                            background: hl.event_type === 'four' ? '#0284c7' : '#d97706',
+                            background:
+                              hl.event_type === 'wicket'
+                                ? '#dc2626'
+                                : hl.event_type === 'four'
+                                ? '#0284c7'
+                                : hl.event_type === 'six'
+                                ? '#d97706'
+                                : '#475569',
                             color: '#fff',
                             padding: '2px 8px',
                             borderRadius: 4,
@@ -747,7 +763,13 @@ export function PlayerHighlightsPage() {
                             textTransform: 'uppercase',
                           }}
                         >
-                          {hl.event_type === 'four' ? 'FOUR · +4' : 'SIX · +6'}
+                          {hl.event_type === 'wicket'
+                            ? 'WICKET 🎯'
+                            : hl.event_type === 'four'
+                            ? 'FOUR · +4'
+                            : hl.event_type === 'six'
+                            ? 'SIX · +6'
+                            : 'DELIVERY'}
                         </div>
                         {hl.duration_sec != null && (
                           <div
@@ -771,11 +793,14 @@ export function PlayerHighlightsPage() {
                       <div style={{ padding: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div>
-                            <div style={{ fontWeight: 700, fontSize: 15 }}>
-                              Over {hl.delivery_metadata?.over_display ?? '—'}
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>
+                              {hl.delivery_metadata?.shot_name
+                                ? hl.delivery_metadata.shot_name
+                                : `Over ${hl.delivery_metadata?.over_display ?? '—'}`}
                             </div>
-                            <div style={{ fontSize: 12, color: colors.textMuted }}>
-                              vs {hl.delivery_metadata?.bowler_name ?? 'Bowler'}
+                            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                              Over {hl.delivery_metadata?.over_display ?? '—'} · vs {hl.delivery_metadata?.bowler_name ?? 'Bowler'}
+                              {hl.delivery_metadata?.speed_kmh ? ` (${hl.delivery_metadata.speed_kmh} km/h)` : ''}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

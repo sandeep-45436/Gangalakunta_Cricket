@@ -29,6 +29,7 @@ from app.api.routes import (  # noqa: E402
     highlights,
     milestones,
     archive,
+    ai_capture,
 )
 from app.core.config import get_settings  # noqa: E402
 from app.core.logging import configure_logging, get_logger  # noqa: E402
@@ -114,6 +115,7 @@ app.include_router(recording.router)
 app.include_router(highlights.router)
 app.include_router(milestones.router)
 app.include_router(archive.router)
+app.include_router(ai_capture.router)
 
 
 @app.get("/", include_in_schema=False)

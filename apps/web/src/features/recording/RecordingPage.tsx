@@ -9,6 +9,7 @@ import {
   type InningsScorecard,
   type Delivery,
   type DeliveryCreate,
+  type AICaptureResponse,
 } from '../../services/apiClient'
 import { AppShell } from '../../components/layout/AppShell'
 import { Card } from '../../components/ui/Card'
@@ -76,6 +77,12 @@ export function RecordingPage() {
   const [extraType, setExtraType] = useState<'' | 'wide' | 'no_ball' | 'bye' | 'leg_bye'>('')
   const [isWicket, setIsWicket] = useState<boolean>(false)
   const [submittingDelivery, setSubmittingDelivery] = useState<boolean>(false)
+
+  // AI Continuous Live Capture (LangGraph + Gemini Vision)
+  const [aiAnalyzing, setAiAnalyzing] = useState<boolean>(false)
+  const [aiLastResponse, setAiLastResponse] = useState<AICaptureResponse | null>(null)
+  const [showAiLogs, setShowAiLogs] = useState<boolean>(false)
+  const [aiDeliveryPhase, setAiDeliveryPhase] = useState<'ready' | 'runup' | 'impact' | 'completed'>('ready')
 
   // ── Load match, scorecard, existing sessions & markers from backend ─────────
   const loadMatchData = useCallback(async () => {
@@ -461,6 +468,111 @@ export function RecordingPage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSubmittingDelivery(false)
+    }
+  }
+
+  // ── AI Video Frame Capture (Base64 JPEG for Gemini Vision) ─────────────────
+  const captureVideoFrameBase64 = (): string | null => {
+    try {
+      const videoElem = videoMode === 'camera' ? videoRef.current : fileVideoRef.current
+      if (!videoElem) return null
+      const canvas = document.createElement('canvas')
+      canvas.width = videoElem.videoWidth || 640
+      canvas.height = videoElem.videoHeight || 360
+      if (canvas.width === 0 || canvas.height === 0) return null
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+      ctx.drawImage(videoElem, 0, 0, canvas.width, canvas.height)
+      return canvas.toDataURL('image/jpeg', 0.8)
+    } catch (e) {
+      console.warn('Frame capture note:', e)
+      return null
+    }
+  }
+
+  // ── AI Auto-Capture Delivery (LangGraph Multi-Agent Pipeline) ──────────────
+  const handleAIAutoCapture = async (runs: number, wicket = false, wType = 'bowled') => {
+    if (!token || !scorecard || !matchId) return
+    const strikerId = scorecard.current_striker?.player_id
+    const nonStrikerId = scorecard.current_non_striker?.player_id
+    const bowlerId = scorecard.current_bowler?.player_id
+    if (!strikerId || !nonStrikerId || !bowlerId) {
+      setError('Active batters or bowler missing. Open Full Scorer to select bowler/batters.')
+      return
+    }
+
+    try {
+      setAiAnalyzing(true)
+      setError('')
+      setUploadSuccess('')
+      setAiDeliveryPhase('runup')
+
+      const session = await ensureSession()
+      if (!session) throw new Error('Could not initialize recording session')
+
+      // Capture exact video playback / elapsed time
+      const capturedElapsed =
+        videoMode === 'file' && fileVideoRef.current
+          ? Math.floor(fileVideoRef.current.currentTime * 1000)
+          : elapsedMs
+
+      setAiDeliveryPhase('impact')
+      const frameBase64 = captureVideoFrameBase64()
+
+      // 1. Record delivery in scorecard
+      const payload: DeliveryCreate = {
+        striker_id: strikerId,
+        non_striker_id: nonStrikerId,
+        bowler_id: bowlerId,
+        batter_runs: runs,
+        extra_type: null,
+        extra_runs: 0,
+        is_boundary: runs === 4 || runs === 6,
+        boundary_type: runs === 4 ? 4 : runs === 6 ? 6 : null,
+        is_batter_boundary: runs === 4 || runs === 6,
+        is_wicket: wicket,
+        wicket_type: wicket ? wType : null,
+        dismissed_player_id: wicket ? strikerId : null,
+        idempotency_key: `ai-ball-${Date.now()}`,
+      }
+
+      const newDeliv = await apiClient.recordDelivery(token, scorecard.innings_id, payload)
+
+      // 2. Dispatch to LangGraph Multi-Agent pipeline
+      const aiResp = await apiClient.aiAutoCaptureDelivery(token, {
+        session_id: session.id,
+        match_id: matchId,
+        innings_id: scorecard.innings_id,
+        delivery_id: newDeliv.id,
+        current_timestamp_ms: capturedElapsed,
+        frame_base64: frameBase64,
+        striker_id: strikerId,
+        striker_name: scorecard.current_striker?.player_name,
+        bowler_id: bowlerId,
+        bowler_name: scorecard.current_bowler?.player_name,
+        admin_runs: runs,
+        admin_is_wicket: wicket,
+        admin_wicket_type: wicket ? wType : null,
+      })
+
+      setAiLastResponse(aiResp)
+      setAiDeliveryPhase('completed')
+
+      // Toast feedback with player attribution
+      const namesList = aiResp.attributed_players
+        .map((p) => `${p.player_name} (${p.role})`)
+        .join(' & ')
+
+      setUploadSuccess(
+        `🎯 AI Delivery Captured! Analyzed by LangGraph and credited directly to: ${namesList}.`
+      )
+
+      await loadMatchData()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+      setAiDeliveryPhase('ready')
+    } finally {
+      setAiAnalyzing(false)
     }
   }
 
@@ -863,6 +975,360 @@ export function RecordingPage() {
                   </Button>
                 </div>
               </>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* ── AI CONTINUOUS DELIVERY CAPTURE (LANGGRAPH + GEMINI VISION) ── */}
+      <Card style={{ marginBottom: 20, padding: 20, border: '1.5px solid #6366f1', background: '#fafafa' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 22 }}>🤖</span>
+              <h3 style={{ margin: 0, fontSize: 17, color: '#1e1b4b', fontWeight: 800 }}>
+                AI Continuous Delivery Capture & Player Attribution
+              </h3>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  background: '#e0e7ff',
+                  color: '#4338ca',
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                }}
+              >
+                LangGraph 4-Agent Pipeline
+              </span>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.textMuted }}>
+              Continuous recording analyzer automatically segments bowler delivery action, tracks run-up/impact, and when you update the score, extracts the highlight clip and attributes it directly to the batter & bowler player records!
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 700,
+                padding: '4px 10px',
+                borderRadius: 16,
+                background: aiAnalyzing ? '#fef3c7' : '#dcfce7',
+                color: aiAnalyzing ? '#92400e' : '#166534',
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: aiAnalyzing ? '#f59e0b' : '#16a34a',
+                  display: 'inline-block',
+                }}
+              />
+              {aiAnalyzing
+                ? 'AI Agents Processing...'
+                : aiDeliveryPhase === 'completed'
+                ? 'Last Delivery Attributed ✓'
+                : 'AI Continuous Monitor Active'}
+            </span>
+          </div>
+        </div>
+
+        {/* Live Active Batter & Bowler Info Bar */}
+        {scorecard && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 16,
+              flexWrap: 'wrap',
+              background: '#ffffff',
+              padding: '10px 14px',
+              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              marginBottom: 16,
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
+              <span>
+                🏏 <strong>Striker (Batter):</strong>{' '}
+                <span style={{ color: colors.primary, fontWeight: 700 }}>
+                  {scorecard.current_striker?.player_name ?? 'Not selected'}
+                </span>
+              </span>
+              <span>
+                ⚾ <strong>Bowler:</strong>{' '}
+                <span style={{ color: '#0284c7', fontWeight: 700 }}>
+                  {scorecard.current_bowler?.player_name ?? 'Not selected'}
+                </span>
+              </span>
+              <span>
+                📊 <strong>Score:</strong> {scorecard.total_runs}/{scorecard.total_wickets} ({scorecard.overs_display} ov)
+              </span>
+            </div>
+
+            <span style={{ fontSize: 11, color: colors.textMuted }}>
+              Target Video Offset: <strong>{formatElapsed(elapsedMs)}</strong>
+            </span>
+          </div>
+        )}
+
+        {/* ONE-TAP AI AUTO-CAPTURE & SCORE BUTTONS */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            ⚡ 1-Click AI Delivery Auto-Capture & Player Reel Attribution:
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+            <button
+              type="button"
+              disabled={aiAnalyzing || !scorecard}
+              onClick={() => { void handleAIAutoCapture(0, false) }}
+              style={{
+                padding: '10px 6px',
+                borderRadius: 8,
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+                fontSize: 13,
+                color: '#334155',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>🛡️ 0 Dot</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>Bowler Dot Ball</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={aiAnalyzing || !scorecard}
+              onClick={() => { void handleAIAutoCapture(1, false) }}
+              style={{
+                padding: '10px 6px',
+                borderRadius: 8,
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+                fontSize: 13,
+                color: '#334155',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>🏃 1 Run</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>Single Strike</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={aiAnalyzing || !scorecard}
+              onClick={() => { void handleAIAutoCapture(4, false) }}
+              style={{
+                padding: '10px 6px',
+                borderRadius: 8,
+                border: '1.5px solid #0284c7',
+                background: '#f0f9ff',
+                cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                fontWeight: 800,
+                fontSize: 13,
+                color: '#0369a1',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>🎯 4 FOUR</span>
+              <span style={{ fontSize: 10, color: '#0284c7' }}>Boundary Reel</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={aiAnalyzing || !scorecard}
+              onClick={() => { void handleAIAutoCapture(6, false) }}
+              style={{
+                padding: '10px 6px',
+                borderRadius: 8,
+                border: '1.5px solid #d97706',
+                background: '#fffbeb',
+                cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                fontWeight: 800,
+                fontSize: 13,
+                color: '#b45309',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>🚀 6 SIX</span>
+              <span style={{ fontSize: 10, color: '#d97706' }}>Maximum Reel</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={aiAnalyzing || !scorecard}
+              onClick={() => { void handleAIAutoCapture(0, true, 'bowled') }}
+              style={{
+                padding: '10px 6px',
+                borderRadius: 8,
+                border: '1.5px solid #ef4444',
+                background: '#fef2f2',
+                cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                fontWeight: 800,
+                fontSize: 13,
+                color: '#dc2626',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>💥 Wicket (Bowled)</span>
+              <span style={{ fontSize: 10, color: '#ef4444' }}>Bowler Highlight</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={aiAnalyzing || !scorecard}
+              onClick={() => { void handleAIAutoCapture(0, true, 'caught') }}
+              style={{
+                padding: '10px 6px',
+                borderRadius: 8,
+                border: '1.5px solid #ef4444',
+                background: '#fef2f2',
+                cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                fontWeight: 800,
+                fontSize: 13,
+                color: '#dc2626',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 15 }}>🧤 Wicket (Caught)</span>
+              <span style={{ fontSize: 10, color: '#ef4444' }}>Bowler & Fielder</span>
+            </button>
+          </div>
+        </div>
+
+        {/* AI LAST RESPONSE & MULTI-AGENT ATTRIBUTION SUMMARY */}
+        {aiLastResponse && (
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 8,
+              padding: 14,
+              border: '1px solid #c7d2fe',
+              marginTop: 12,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 16 }}>🎯</span>
+                <strong style={{ fontSize: 14, color: '#1e1b4b' }}>
+                  {aiLastResponse.shot_name} ({aiLastResponse.event_type.toUpperCase()})
+                </strong>
+                <span
+                  style={{
+                    background: '#ede9fe',
+                    color: '#6d28d9',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: 4,
+                  }}
+                >
+                  {(aiLastResponse.gemini_confidence * 100).toFixed(0)}% AI Confidence
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAiLogs(!showAiLogs)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#6366f1',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                {showAiLogs ? 'Hide Agent Logs ▲' : 'View LangGraph Agent Logs ▼'}
+              </button>
+            </div>
+
+            <div style={{ fontSize: 13, color: '#334155', marginBottom: 10 }}>
+              {aiLastResponse.gemini_summary}
+            </div>
+
+            {/* Direct Player Attributions list */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+              {aiLastResponse.attributed_players.map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    background: item.role === 'striker' ? '#eff6ff' : item.role === 'bowler' ? '#f0fdf4' : '#faf5ff',
+                    border: `1px solid ${
+                      item.role === 'striker' ? '#bfdbfe' : item.role === 'bowler' ? '#bbf7d0' : '#e9d5ff'
+                    }`,
+                    fontSize: 12,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 800, color: item.role === 'striker' ? '#1e40af' : '#166534' }}>
+                      {item.role === 'striker' ? '🏏 Batter Reel' : item.role === 'bowler' ? '⚾ Bowler Reel' : '🧤 Fielder'}
+                    </span>
+                    <Link
+                      to={`/players/${item.player_id}/highlights`}
+                      style={{ fontSize: 11, fontWeight: 700, color: colors.primary, textDecoration: 'none' }}
+                    >
+                      Open Reel ↗
+                    </Link>
+                  </div>
+                  <div style={{ fontWeight: 700, marginTop: 2 }}>{item.title}</div>
+                  <div style={{ color: colors.textMuted, fontSize: 11 }}>{item.description}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Expandable Agent Logs */}
+            {showAiLogs && (
+              <div
+                style={{
+                  marginTop: 12,
+                  background: '#0f172a',
+                  color: '#38bdf8',
+                  padding: 12,
+                  borderRadius: 6,
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                }}
+              >
+                {aiLastResponse.logs.map((log, lidx) => (
+                  <div key={lidx} style={{ marginBottom: 4 }}>
+                    {log}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}

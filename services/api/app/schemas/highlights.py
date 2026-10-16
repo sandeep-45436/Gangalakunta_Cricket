@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 HighlightStatus = Literal["pending", "processing", "ready", "retrying", "failed"]
-HighlightEventType = Literal["four", "six"]
+HighlightEventType = Literal["four", "six", "wicket", "dot", "delivery", "milestone"]
 
 
 class HighlightTriggerRequest(BaseModel):
@@ -71,4 +71,5 @@ class PlayerHighlightReel(BaseModel):
     total_highlights: int
     fours_count: int
     sixes_count: int
+    wickets_count: int = 0
     highlights: List[PlayerHighlightResponse]

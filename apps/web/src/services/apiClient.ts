@@ -388,6 +388,20 @@ export const apiClient = {
   getMatchHighlights: (token: string, matchId: string) =>
     request<PlayerHighlight[]>(`/api/matches/${matchId}/highlights`, { token }),
 
+  // AI Live Delivery Capture & LangGraph Multi-Agent
+  aiAnalyzeStream: (token: string, body: AICaptureStreamRequest) =>
+    request<AICaptureResponse>('/api/ai/analyze-stream', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      token,
+    }),
+  aiAutoCaptureDelivery: (token: string, body: AICaptureStreamRequest) =>
+    request<AICaptureResponse>('/api/ai/auto-capture-delivery', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      token,
+    }),
+
   // milestones & celebrations (Phase 5)
   getMatchMilestones: (token: string, matchId: string) =>
     request<PlayerMilestone[]>(`/api/matches/${matchId}/milestones`, { token }),
@@ -522,7 +536,7 @@ export interface HighlightJob {
   marker_id?: string | null
   player_id: string
   status: 'pending' | 'processing' | 'ready' | 'retrying' | 'failed'
-  event_type: 'four' | 'six'
+  event_type: 'four' | 'six' | 'wicket' | 'dot' | 'delivery' | 'milestone'
   retry_count: number
   max_retries: number
   error_message?: string | null
@@ -542,7 +556,7 @@ export interface PlayerHighlight {
   delivery_id: string
   marker_id?: string | null
   player_id: string
-  event_type: 'four' | 'six'
+  event_type: 'four' | 'six' | 'wicket' | 'dot' | 'delivery' | 'milestone'
   status: 'pending' | 'processing' | 'ready' | 'failed'
   video_url?: string | null
   video_key?: string | null
@@ -559,6 +573,9 @@ export interface PlayerHighlight {
     boundary_type?: number
     striker_name?: string
     bowler_name?: string
+    shot_name?: string
+    speed_kmh?: number
+    role?: string
   }
   version: number
   created_at: string
@@ -571,7 +588,64 @@ export interface PlayerHighlightReel {
   total_highlights: number
   fours_count: number
   sixes_count: number
+  wickets_count?: number
   highlights: PlayerHighlight[]
+}
+
+// ── AI Capture (LangGraph + Gemini Vision) ───────────────────────────────────
+
+export interface AICaptureStreamRequest {
+  session_id: string
+  match_id: string
+  innings_id?: string | null
+  delivery_id?: string | null
+  current_timestamp_ms: number
+  frame_base64?: string | null
+  video_url?: string | null
+  striker_id?: string | null
+  striker_name?: string | null
+  bowler_id?: string | null
+  bowler_name?: string | null
+  fielder_id?: string | null
+  fielder_name?: string | null
+  admin_runs?: number | null
+  admin_extra_type?: string | null
+  admin_is_wicket?: boolean | null
+  admin_wicket_type?: string | null
+}
+
+export interface AttributedPlayerItem {
+  player_id: string
+  player_name: string
+  role: string
+  event_type: string
+  title: string
+  description: string
+  metrics: Record<string, unknown>
+}
+
+export interface AICaptureResponse {
+  session_id: string
+  match_id: string
+  delivery_detected: boolean
+  delivery_phase: string
+  window_start_ms: number
+  window_impact_ms: number
+  window_end_ms: number
+  bowler_speed_kmh?: number | null
+  event_type: string
+  shot_name: string
+  shot_quality: string
+  runs_estimate: number
+  wicket_type?: string | null
+  gemini_summary: string
+  gemini_confidence: number
+  score_reconciled: boolean
+  marker_id?: string | null
+  highlight_job_id?: string | null
+  attributed_players: AttributedPlayerItem[]
+  status_message: string
+  logs: string[]
 }
 
 // ── Recording Models ──────────────────────────────────────────────────────────

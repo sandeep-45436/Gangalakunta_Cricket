@@ -28,14 +28,16 @@ logger = get_logger(__name__)
 
 def check_delivery_qualification(delivery: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """
-    Check if a delivery qualifies for a batter highlight:
+    Check if a delivery qualifies for a highlight:
     - Must NOT be voided.
-    - Must be credited to batter (`is_batter_boundary is True`).
-    - Must be boundary 4 or 6.
-    Byes, leg-byes, and wides do not qualify.
+    - Wickets (credited to bowler/fielder) -> "wicket"
+    - Batter-credited boundaries (credited to striker) -> "four" or "six"
     """
     if delivery.get("is_voided"):
         return False, None
+
+    if delivery.get("is_wicket"):
+        return True, "wicket"
 
     is_batter_boundary = bool(delivery.get("is_batter_boundary"))
     boundary_type = delivery.get("boundary_type")
@@ -120,8 +122,11 @@ async def create_or_get_highlight_job(
             detail="Delivery does not qualify for batter highlight (must be verified batter-credited four or six)",
         )
 
-    # 2. Derive player ID directly from striker_id
-    player_id = str(delivery["striker_id"])
+    # 2. Derive player ID: for wickets attribute to bowler; for boundaries to striker
+    if event_type == "wicket":
+        player_id = str(delivery.get("bowler_id") or delivery["striker_id"])
+    else:
+        player_id = str(delivery["striker_id"])
     match_id = str(delivery["match_id"])
     innings_id = str(delivery["innings_id"])
 
@@ -515,6 +520,7 @@ async def get_player_highlight_reel(
 
     fours = sum(1 for h in highlights_rows if h.get("event_type") == "four")
     sixes = sum(1 for h in highlights_rows if h.get("event_type") == "six")
+    wickets = sum(1 for h in highlights_rows if h.get("event_type") == "wicket")
 
     typed_highlights = [PlayerHighlightResponse(**h) for h in highlights_rows]
 
@@ -524,6 +530,7 @@ async def get_player_highlight_reel(
         total_highlights=len(typed_highlights),
         fours_count=fours,
         sixes_count=sixes,
+        wickets_count=wickets,
         highlights=typed_highlights,
     )
 
