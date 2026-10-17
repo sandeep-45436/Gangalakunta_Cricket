@@ -58,6 +58,25 @@ class Settings(BaseSettings):
                 or self.insforge_anon_key
                 or os.getenv("VITE_INSFORGE_ANON_KEY", "")
             )
+        if not self.insforge_api_key or not self.insforge_url:
+            import json
+            from pathlib import Path
+            for candidate in [
+                Path(".insforge/project.json"),
+                Path("../.insforge/project.json"),
+                Path("../../.insforge/project.json"),
+            ]:
+                if candidate.exists():
+                    try:
+                        with open(candidate, "r", encoding="utf-8") as f:
+                            pj = json.load(f)
+                            if not self.insforge_api_key and pj.get("api_key"):
+                                self.insforge_api_key = pj["api_key"]
+                            if not self.insforge_url and pj.get("oss_host"):
+                                self.insforge_url = pj["oss_host"]
+                    except Exception:
+                        pass
+                    break
         return self
 
     @property

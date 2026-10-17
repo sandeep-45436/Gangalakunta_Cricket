@@ -167,8 +167,8 @@ async function request<T>(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
-  if (options?.token) {
-    headers['Authorization'] = `Bearer ${options.token}`
+  if (options?.token && options.token.trim()) {
+    headers['Authorization'] = `Bearer ${options.token.trim()}`
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,

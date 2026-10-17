@@ -22,15 +22,29 @@ class InsForgeClient:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._base_url = settings.insforge_url
-        self._api_key = settings.insforge_api_key
+        self._base_url = settings.insforge_url.rstrip("/")
+        self._api_key = settings.insforge_api_key or settings.insforge_anon_key
         self._rest = f"{self._base_url}/api/database/records"
-        self._headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
+        self._headers = self.default_headers
+
+    @property
+    def default_headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {
             "Content-Type": "application/json",
             "Prefer": "return=representation",
         }
+        if self._api_key and self._api_key.strip():
+            headers["apikey"] = self._api_key.strip()
+            headers["Authorization"] = f"Bearer {self._api_key.strip()}"
+        return headers
+
+    @property
+    def storage_headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        if self._api_key and self._api_key.strip():
+            headers["apikey"] = self._api_key.strip()
+            headers["Authorization"] = f"Bearer {self._api_key.strip()}"
+        return headers
 
     # ── connectivity ──────────────────────────────────────────────────────────
 
@@ -136,12 +150,18 @@ class InsForgeClient:
         PostgREST evaluates RLS policies using auth.uid() from this token.
         Use for INSERT/UPDATE/DELETE to enforce ownership policies.
         """
-        return {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {token}",
+        headers = {
             "Content-Type": "application/json",
             "Prefer": "return=representation",
         }
+        if self._api_key and self._api_key.strip():
+            headers["apikey"] = self._api_key.strip()
+        auth_token = (token or "").strip()
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+        elif self._api_key and self._api_key.strip():
+            headers["Authorization"] = f"Bearer {self._api_key.strip()}"
+        return headers
 
     async def insert_as_user(
         self,
@@ -216,13 +236,9 @@ class InsForgeClient:
 
     async def storage_ping(self, bucket: str) -> bool:
         url = f"{self._base_url}/api/storage/buckets/{bucket}"
-        headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
-        }
         try:
             async with httpx.AsyncClient(timeout=10.0) as c:
-                resp = await c.get(url, headers=headers)
+                resp = await c.get(url, headers=self.storage_headers)
                 return resp.status_code in (200, 404)
         except Exception as exc:
             logger.error("Storage ping failed: %s", exc)
@@ -237,38 +253,26 @@ class InsForgeClient:
     ) -> Dict[str, Any]:
         """Upload a file to InsForge storage. Returns {'key': ..., 'url': ..., 'size': ...}."""
         url = f"{self._base_url}/api/storage/buckets/{bucket}/objects"
-        headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
-        }
         files = {"file": (filename, content, content_type)}
         async with httpx.AsyncClient(timeout=60.0) as c:
-            resp = await c.post(url, headers=headers, files=files)
+            resp = await c.post(url, headers=self.storage_headers, files=files)
             resp.raise_for_status()
             return resp.json()
 
     async def download_storage_file(self, bucket: str, key: str) -> bytes:
         """Download raw bytes from InsForge storage by key."""
         url = f"{self._base_url}/api/storage/buckets/{bucket}/objects/{key}"
-        headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
-        }
         async with httpx.AsyncClient(timeout=60.0) as c:
-            resp = await c.get(url, headers=headers)
+            resp = await c.get(url, headers=self.storage_headers)
             resp.raise_for_status()
             return resp.content
 
     async def delete_storage_file(self, bucket: str, key: str) -> bool:
         """Delete an object from InsForge storage by key."""
         url = f"{self._base_url}/api/storage/buckets/{bucket}/objects/{key}"
-        headers = {
-            "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
-        }
         try:
             async with httpx.AsyncClient(timeout=15.0) as c:
-                resp = await c.delete(url, headers=headers)
+                resp = await c.delete(url, headers=self.storage_headers)
                 return resp.status_code in (200, 204)
         except Exception as exc:
             logger.error("Storage delete failed: %s", exc)
