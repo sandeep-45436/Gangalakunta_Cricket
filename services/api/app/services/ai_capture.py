@@ -106,7 +106,7 @@ async def run_ai_capture_pipeline(
             await recording_svc.link_marker_to_delivery(
                 db=db,
                 marker_id=marker_id,
-                body=EventMarkerLinkDelivery(delivery_id=req.delivery_id),
+                data=EventMarkerLinkDelivery(delivery_id=req.delivery_id),
                 token=token,
             )
 

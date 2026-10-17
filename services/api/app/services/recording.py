@@ -345,7 +345,8 @@ async def create_marker(
             logger.info("Rapid tap suppressed (<250ms diff), returning previous marker")
             return last
 
-    marker_number = len(existing_markers) + 1
+    max_num = max((int(m.get("marker_number") or 0) for m in existing_markers), default=0)
+    marker_number = max_num + 1
     marker_label = data.marker_label or f"Marker {marker_number:02d}"
 
     delivery_display = None
@@ -379,8 +380,26 @@ async def create_marker(
         "audit_metadata": data.audit_metadata or {},
     }
 
-    inserted = await db.insert_as_user("event_markers", [payload], token)
-    created_marker = inserted[0]
+    try:
+        inserted = await db.insert_as_user("event_markers", [payload], token)
+        created_marker = inserted[0]
+    except httpx.HTTPStatusError as err:
+        if err.response.status_code == 409:
+            # Concurrency fallback: fetch latest marker_number and retry with unique client_marker_id
+            latest = await db.select(
+                "event_markers",
+                filters={"session_id": f"eq.{session_id}"},
+                order="marker_number.desc",
+                limit=1,
+            )
+            next_num = (int(latest[0].get("marker_number") or 0) + 1) if latest else (marker_number + 1)
+            payload["marker_number"] = next_num
+            if payload.get("client_marker_id"):
+                payload["client_marker_id"] = f"{payload['client_marker_id']}-{next_num}"
+            inserted = await db.insert_as_user("event_markers", [payload], token)
+            created_marker = inserted[0]
+        else:
+            raise
 
     # Automatic highlight trigger: if delivery was provided and qualifies
     if data.delivery_id and deliv and deliv.get("is_batter_boundary") and deliv.get("boundary_type") in (4, 6):
