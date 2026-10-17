@@ -83,6 +83,7 @@ export function RecordingPage() {
   const [aiLastResponse, setAiLastResponse] = useState<AICaptureResponse | null>(null)
   const [showAiLogs, setShowAiLogs] = useState<boolean>(false)
   const [aiDeliveryPhase, setAiDeliveryPhase] = useState<'ready' | 'runup' | 'impact' | 'completed'>('ready')
+  const [cameraResolution, setCameraResolution] = useState<string>('1080p 60fps HD')
 
   // ── Load match, scorecard, existing sessions & markers from backend ─────────
   const loadMatchData = useCallback(async () => {
@@ -126,17 +127,50 @@ export function RecordingPage() {
     void loadMatchData()
   }, [loadMatchData])
 
-  // ── Camera and media stream initialization ──────────────────────────────────
+  // ── Camera and media stream initialization (Crystal-Clear 1080p 60fps Broadcast) ────
   const startCamera = async () => {
     try {
       setPermissionError('')
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920, max: 3840, min: 1280 },
+          height: { ideal: 1080, max: 2160, min: 720 },
+          frameRate: { ideal: 60, min: 30 },
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
       })
       mediaStreamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        videoRef.current.onloadedmetadata = () => {
+          const w = videoRef.current?.videoWidth || 1920
+          const h = videoRef.current?.videoHeight || 1080
+          setCameraResolution(`${w}x${h} @ 60fps HD`)
+        }
+      }
+
+      // Enable continuous auto-focus and auto-exposure if supported by camera hardware
+      const videoTrack = stream.getVideoTracks()[0]
+      if (videoTrack) {
+        try {
+          const caps = (videoTrack.getCapabilities ? videoTrack.getCapabilities() : {}) as Record<string, unknown>
+          const advanced: Record<string, unknown>[] = []
+          if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+            advanced.push({ focusMode: 'continuous' })
+          }
+          if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) {
+            advanced.push({ exposureMode: 'continuous' })
+          }
+          if (advanced.length > 0 && videoTrack.applyConstraints) {
+            await videoTrack.applyConstraints({ advanced: advanced as unknown as MediaTrackConstraintSet[] })
+          }
+        } catch {
+          // Hardware advanced constraints optional
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unable to access camera'
@@ -220,10 +254,20 @@ export function RecordingPage() {
 
       if (mediaStreamRef.current && typeof MediaRecorder !== 'undefined') {
         try {
-          const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-            ? 'video/webm;codecs=vp8,opus'
-            : 'video/webm'
-          const rec = new MediaRecorder(mediaStreamRef.current, { mimeType })
+          const supportedTypes = [
+            'video/webm;codecs=vp9,opus',
+            'video/mp4;codecs=avc1,mp4a',
+            'video/webm;codecs=h264,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm',
+          ]
+          const mimeType = supportedTypes.find((t) => MediaRecorder.isTypeSupported(t)) || 'video/webm'
+          // High-clarity 6 Mbps broadcast encoding for fast cricket ball & action motion
+          const rec = new MediaRecorder(mediaStreamRef.current, {
+            mimeType,
+            videoBitsPerSecond: 6_000_000,
+            audioBitsPerSecond: 128_000,
+          })
           recordedChunksRef.current = []
           rec.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data)
@@ -231,7 +275,14 @@ export function RecordingPage() {
           rec.start(1000)
           mediaRecorderRef.current = rec
         } catch (recErr) {
-          console.warn('MediaRecorder error:', recErr)
+          console.warn('High-bitrate MediaRecorder fallback:', recErr)
+          const fallbackRec = new MediaRecorder(mediaStreamRef.current)
+          recordedChunksRef.current = []
+          fallbackRec.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data)
+          }
+          fallbackRec.start(1000)
+          mediaRecorderRef.current = fallbackRec
         }
       }
 
@@ -476,14 +527,18 @@ export function RecordingPage() {
     try {
       const videoElem = videoMode === 'camera' ? videoRef.current : fileVideoRef.current
       if (!videoElem) return null
+      const width = videoElem.videoWidth || 1280
+      const height = videoElem.videoHeight || 720
+      if (width === 0 || height === 0) return null
       const canvas = document.createElement('canvas')
-      canvas.width = videoElem.videoWidth || 640
-      canvas.height = videoElem.videoHeight || 360
-      if (canvas.width === 0 || canvas.height === 0) return null
-      const ctx = canvas.getContext('2d')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d', { alpha: false })
       if (!ctx) return null
-      ctx.drawImage(videoElem, 0, 0, canvas.width, canvas.height)
-      return canvas.toDataURL('image/jpeg', 0.8)
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(videoElem, 0, 0, width, height)
+      return canvas.toDataURL('image/jpeg', 0.92)
     } catch (e) {
       console.warn('Frame capture note:', e)
       return null
@@ -702,35 +757,63 @@ export function RecordingPage() {
       </Card>
 
       {/* VIEWFINDER & VIDEO PLAYER CONTAINER */}
-      <div style={{ position: 'relative', width: '100%', borderRadius: 12, overflow: 'hidden', background: '#000', marginBottom: 16 }}>
+      <div style={{ position: 'relative', width: '100%', borderRadius: 12, overflow: 'hidden', background: '#090d16', border: '1px solid #1e293b', marginBottom: 16 }}>
         {videoMode === 'camera' ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              width: '100%',
-              height: '360px',
-              objectFit: 'cover',
-              display: 'block',
-              filter: isRecording ? 'none' : 'grayscale(25%)',
-            }}
-          />
+          <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', maxHeight: '560px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: '100%',
+                height: '100%',
+                maxHeight: '560px',
+                objectFit: 'contain',
+                display: 'block',
+              }}
+            />
+            {/* Live Camera Broadcast Quality Tag */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 14,
+                left: 14,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'rgba(15, 23, 42, 0.85)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                padding: '4px 10px',
+                borderRadius: 20,
+                fontSize: 11,
+                color: '#38bdf8',
+                fontWeight: 700,
+                backdropFilter: 'blur(4px)',
+                zIndex: 10,
+              }}
+            >
+              <span>📺</span>
+              <span>{cameraResolution}</span>
+            </div>
+          </div>
         ) : uploadedVideoUrl ? (
-          <video
-            ref={fileVideoRef}
-            src={uploadedVideoUrl}
-            controls
-            onTimeUpdate={(e) => setElapsedMs(Math.floor(e.currentTarget.currentTime * 1000))}
-            style={{
-              width: '100%',
-              height: '360px',
-              objectFit: 'contain',
-              display: 'block',
-              background: '#000',
-            }}
-          />
+          <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', maxHeight: '560px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+            <video
+              ref={fileVideoRef}
+              src={uploadedVideoUrl}
+              controls
+              onTimeUpdate={(e) => setElapsedMs(Math.floor(e.currentTarget.currentTime * 1000))}
+              style={{
+                width: '100%',
+                height: '100%',
+                maxHeight: '560px',
+                objectFit: 'contain',
+                display: 'block',
+                background: '#000',
+              }}
+            />
+          </div>
         ) : (
           <div style={{ height: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', padding: 20, textAlign: 'center' }}>
             <div style={{ fontSize: 36, marginBottom: 8 }}>🎬</div>
